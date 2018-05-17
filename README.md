@@ -1,2 +1,2 @@
 # callfinder
-Bash script for filtering calls and viewing full logs
+Bash script for filtering asterisk cdr calls and viewing corresponding full logs
