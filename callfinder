@@ -1,0 +1,278 @@
+#!/bin/bash
+echo "Callfinder 1.0.6"
+echo ""
+
+flines=5500000 # How many Asterisk full log lines to search if binary search fails
+clines=1000000 # How many CDR lines to search - increase if you need an older call
+
+full_log=/var/log/asterisk/full
+cdr_csv=/var/log/asterisk/cdr-csv/Master.csv
+trace_log=''
+pattern1='Aepeej6Daahu'
+pattern2='Aepeej6Daahu'
+pattern3='Aepeej6Daahu'
+date_filter=''
+f_option=0
+c_option=0
+d_option=0
+e1debug=0
+start_date=''
+end_date=''
+
+COFF='\\\e[0m'       # Text Reset
+BCYAN='\\\e[1;96m'      # Bold CYAN
+NCYAN='\\\e[0;36m'      # Bold CYAN
+BPURPLE='\\\e[1;35m'      # Bold MAGENTA
+BYELLOW='\\\e[1;33m'      # Bold YELLOW
+BRED='\\\e[1;31m'      # Bold RED
+BGREEN='\\\e[1;32m'      # Bold GREEN
+BBLUE='\\\e[1;34m'      # Bold BLUE
+
+re='^[0-9]+$'
+current_year=$(date +"%Y")
+
+if [ -f /var/log/slsolucije/happe1-trace.log ]; then
+    trace_log=/var/log/slsolucije/happe1-trace.log
+elif [ -f /var/log/happe1-trace.log ];then
+    trace_log=/var/log/happe1-trace.log
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --full|-f)
+      f_option=1
+      ;;
+    --cdr|-c)
+      c_option=1
+      ;;
+    --date|-d)
+      d_option=1
+      ;;
+    --after|-a)
+      a_option=1
+      ;;
+    --before|-b)
+      b_option=1
+      ;;
+    --help|-h)
+      echo "Usage: callfinder [PATTERN1] [PATTERN2] ... [OPTIONS]"
+      echo "Options:"
+      echo "  -d, --date [DATE]          show calls made on supplied DATE"
+      echo "  -a, --after [DATE]         show calls made after (not included) supplied DATE"
+      echo "  -b, --before [DATE]        show calls made before (not included) supplied DATE"
+      echo "  -f, --full [FILENAME]      use alternative Asterisk full log from FILENAME"
+      echo "  -c, --cdr [FILENAME]       use alternative Asterisk CDR csv from FILENAME"
+      echo ""
+      exit 1
+      ;;
+    *)
+      if [[ $f_option == 1 ]];then
+          full_log=$1
+          f_option=0
+      elif [[ $c_option == 1 ]];then
+          cdr_csv=$1
+          c_option=0
+      elif [[ $d_option == 1 ]];then
+          date_filter=$1
+          date_filter=$(date --date="$date_filter" +%Y-%m-%d 2> /dev/null)
+          if [[ $date_filter == '' ]]; then
+              date_filter=$(date --date="today" +%Y-%m-%d)
+              echo "Invalid date, using today($date_filter)"
+          fi
+          d_option=0
+      elif [[ $a_option == 1 ]];then
+          start_date=$1
+          start_date=$(date --date="$start_date +1 days"  +%Y-%m-%d 2> /dev/null)
+          a_option=0
+      elif [[ $b_option == 1 ]];then
+          end_date=$1
+          end_date=$(date --date="$end_date" +%Y-%m-%d 2> /dev/null)
+          b_option=0
+      elif [[ $pattern1 == 'Aepeej6Daahu' ]];then
+          pattern1=$1
+      elif [[ $pattern2 == 'Aepeej6Daahu' ]];then
+          pattern2=$1
+      elif [[ $pattern3 == 'Aepeej6Daahu' ]];then
+          pattern3=$1
+      fi
+      ;;
+  esac
+  shift
+done
+
+
+if [[ $pattern1 == 'Aepeej6Daahu' ]]; then
+    echo "Need atleast one pattern to search!"
+    echo "Usage: callfinder [PATTERN1] [PATTERN2] ... [OPTIONS]"
+    exit 1
+fi
+
+if [[ $date_filter == '' ]]; then
+    if [[ $(date --date="$pattern1" 2> /dev/null) != '' && ${#pattern1} > 4 ]]; then
+        temp_filter=$(date --date="$pattern1" +%Y-%m-%d 2> /dev/null)
+        filter_year=$(echo $temp_filter | cut -d'-' -f1)
+        if [[ $filter_year > $(( $current_year - 4 )) && $filter_year < $(( $current_year + 1 )) ]]; then
+            pattern1=Aepeej6Daahu
+            date_filter=$temp_filter
+        else
+            temp_filter=''
+        fi
+    fi
+    if [[ $(date --date="$pattern2" 2> /dev/null) != '' && ${#pattern2} > 4 ]]; then
+        temp_filter=$(date --date="$pattern2" +%Y-%m-%d 2> /dev/null)
+        filter_year=$(echo $temp_filter | cut -d'-' -f1)
+        if [[ $filter_year > $(( $current_year - 4 )) && $filter_year < $(( $current_year + 1 )) ]]; then
+            pattern2=Aepeej6Daahu
+            date_filter=$temp_filter
+        else
+            temp_filter=''
+        fi
+    fi
+    if [[ $(date --date="$pattern3" 2> /dev/null) != '' && ${#pattern3} > 4 ]]; then
+        temp_filter=$(date --date="$pattern3" +%Y-%m-%d 2> /dev/null)
+        filter_year=$(echo $temp_filter | cut -d'-' -f1)
+        if [[ $filter_year > $(( $current_year - 4 )) && $filter_year < $(( $current_year + 1 )) ]]; then
+            pattern3=Aepeej6Daahu
+            date_filter=$temp_filter
+        else
+            temp_filter=''
+        fi
+    fi
+fi
+
+# Check for month range
+if [[ $date_filter == '' && $start_date == ''  && $end_date == '' ]]; then
+    if [[ $pattern1 == 'this_month' || $pattern2 == 'this_month' || $pattern3 == 'this_month' ]]; then
+        start_date=$(date -d "-$(($(date +%d)-1)) days" +%Y-%m-%d 2> /dev/null)
+        end_date=$(date -d "-$(date +%d) days +1 month" +%Y-%m-%d 2> /dev/null)
+    elif [[ $pattern1 == 'last_month' || $pattern2 == 'last_month' || $pattern3 == 'last_month' ]]; then
+        start_date=$(date -d "-1 month -$(($(date +%d)-1)) days" +%Y-%m-%d 2> /dev/null)
+        end_date=$(date -d "-$(date +%d) days" +%Y-%m-%d 2> /dev/null)
+    elif [[ $pattern1 == 'this_week' || $pattern2 == 'this_week' || $pattern3 == 'this_week' ]]; then
+        start_date=$(date -dlast-monday +%Y-%m-%d 2> /dev/null)
+        end_date=$(date -dnext-sunday +%Y-%m-%d 2> /dev/null)
+    elif [[ $pattern1 == 'last_week' || $pattern2 == 'last_week' || $pattern3 == 'last_week' ]]; then
+        start_date=$(date -d'last-monday-7 days' +%Y-%m-%d 2> /dev/null)
+        end_date=$(date -dlast-sunday +%Y-%m-%d 2> /dev/null)
+    fi
+fi
+
+if [ -e $full_log ];then
+    :
+else
+    echo "Full log file not found!"
+    exit 1
+fi
+if [ -e $cdr_csv ];then
+    :
+else
+    echo "CDR file not found!"
+    exit 1
+fi
+
+days=90
+days2=0
+while [ $days -gt 0 ]; do
+    first_date=$(date --date="$(date +%Y-%m-%d) -$days day" +%Y-%m-%d)
+    if [ -z "$(look "[$first_date" $full_log | head -n1)" ]; then
+        days=$(( days - 1 ))
+    else
+        break
+    fi
+done
+
+while [ $days2 -lt 90 ]; do
+    last_date=$(date --date="$(date +%Y-%m-%d) -$days2 day" +%Y-%m-%d)
+    if [ -z "$(look "[$last_date" $full_log | head -n1)" ]; then
+        days2=$(( days2 + 1 ))
+    else
+        break
+    fi
+done
+
+echo "CDR records:"
+
+i=0
+while read -r line
+do
+    call_date=$(echo $line | cut -d',' -f6 | cut -d'"' -f2)
+
+    if [ "$start_date" != '' -a $(date -d "$call_date" +%s) -lt $(date -d "$start_date" +%s) ];then 
+        continue
+    elif [ "$end_date" != '' -a $(date -d "$call_date" +%s) -ge $(date -d "$end_date" +%s) ];then 
+        continue
+    fi
+    if [ $(date -d "$call_date" +%s) -lt $(date -d "$first_date" +%s) ];then 
+        echo "(N/A) " $line
+    elif [ $(date -d "$call_date" +%s) -ge $(date -d "$last_date +1 day" +%s) ]; then
+        echo "(N/A) " $line
+    else
+        i=$(( $i + 1 ))
+        #status=$(echo $line | cut -d',' -f9 | cut -d'"' -f2)
+        #if [ "$status" = "ANSWERED" ]; then
+        #echo -e "$(echo "("$i")   " $line | sed "s/\ \"/\ \"$BCYAN/g" | sed "s/\"\,/$COFF\"\,/g")"
+        echo -e "$(echo "("$i")   " $line | sed "s/\ \"/\ \"$NCYAN/g" | sed "s/\"\,/$COFF\"\,/g" | sed "s/ANSWERED/$BGREEN ANSWERED $COFF/g" | sed "s/BUSY/$BYELLOW BUSY $COFF/g" | sed "s/NO ANSWER/$BBLUE NO ANSWER $COFF/g" | sed "s/FAILED/$BRED FAILED $COFF/g")"
+
+        #fi
+    fi
+done < <(tail -$clines $cdr_csv | grep "$date_filter" | grep -e "$pattern1" -e "$pattern2" -e "$pattern3" | awk '{while(match($0,/"[^"]+",|([^,]+(,|$))/,a)){$0=substr($0,RSTART+RLENGTH);b[++x]=a[0]} print b[2],b[3],b[4],b[6],b[7],b[10],b[13],b[14],b[15];x=0}')
+
+echo ""
+if [ $i -eq 0 ]; then
+    echo "No calls found for analysis"
+    exit
+else
+    echo "Select call to analyze [NUMBER]:"
+fi
+
+read call_num
+
+if ! [[ $call_num =~ $re ]]; then
+    echo "Invalid number"
+    exit
+elif [ $call_num -gt $i -o $call_num -lt 1 ]; then
+    echo "Invalid number"
+    exit
+else
+    i=0
+    while read -r line
+    do
+        call_date=$(echo $line | cut -d',' -f6 | cut -d'"' -f2) # | cut -d' ' -f1)
+        if [ $(date -d "$call_date" +%s) -lt $(date -d "$first_date" +%s) ]; then
+            continue
+        fi
+
+        i=$(( $i + 1 ))
+        if [ $i -eq $call_num ];then
+            call=$line
+        fi
+    done < <(tail -$clines $cdr_csv | grep "$date_filter" | grep -e "$pattern1" -e "$pattern2" -e "$pattern3" | awk '{while(match($0,/"[^"]+",|([^,]+(,|$))/,a)){$0=substr($0,RSTART+RLENGTH);b[++x]=a[0]} print b[2],b[3],b[4],b[6],b[7],b[10],b[13],b[14],b[15];x=0}')
+
+    channel=$(echo $call | cut -d',' -f4 | cut -d'"' -f2)
+    date=$(echo $call | cut -d',' -f6 | cut -d'"' -f2)
+    date=$(date -d "$date" +%Y-%m-%d_%H | sed 's/_/ /g')
+    call_time=$(echo $call | cut -d',' -f6 | cut -d'"' -f2 | cut -d' ' -f2)
+
+    echo ""
+    echo "Full log:"
+    echo ""
+
+    call_line=$(look "[$date" $full_log | grep "$channel" | head -n1)
+    id=$(echo $call_line | cut -d']' -f3 | cut -d'[' -f2)
+
+    if [ -z "$id" ];then
+        call_line=$(tail -$flines $full_log | grep "$channel" | head -n1)
+        id=$(echo $call_line | cut -d']' -f3 | cut -d'[' -f2)
+        if [ -z "$id" ]; then
+            echo "Couldn't find call ID!"
+            exit 1
+        else
+            echo -e "$(tail -$flines $full_log | grep "$id" | cut -d']' -f1,4,5,6,7,8,9 | sed "s/\(Executing\ \[.*\]\)\(.*\)\((\"\)\(.*\)\(\")\)/\1$BCYAN\2$COFF\3$BPURPLE\4$COFF\5/g" | sed "s/ ringing/$BYELLOW ringing$COFF/g" | sed "s/ answered/$BGREEN answered$COFF/g" | sed "s/ busy/$BYELLOW busy$COFF/g" | sed 's/\].*-- /] -- /g' | sed 's/\].*== /] == /g')"
+        fi
+    elif [ -z "$date" ]; then
+        echo -e "$(tail -$flines $full_log | grep "$id" | cut -d']' -f1,4,5,6,7,8,9 | sed "s/\(Executing\ \[.*\]\)\(.*\)\((\"\)\(.*\)\(\")\)/\1$BCYAN\2$COFF\3$BPURPLE\4$COFF\5/g" | sed "s/ ringing/$BYELLOW ringing$COFF/g" | sed "s/ answered/$BGREEN answered$COFF/g" | sed "s/ busy/$BYELLOW busy$COFF/g" | sed 's/\].*-- /] -- /g' | sed 's/\].*== /] == /g')"
+    else
+        echo -e "$(look "[$date" $full_log | grep --color=always "$id" | cut -d']' -f1,4,5,6,7,8,9 | sed "s/\(Executing\ \[.*\]\)\(.*\)\((\"\)\(.*\)\(\")\)/\1$BCYAN\2$COFF\3$BPURPLE\4$COFF\5/g" | sed "s/ ringing/$BYELLOW ringing$COFF/g" | sed "s/ answered/$BGREEN answered$COFF/g" | sed "s/ busy/$BYELLOW busy$COFF/g" | sed 's/\].*-- /] -- /g' | sed 's/\].*== /] == /g')"
+    fi
+
+    
